@@ -1,0 +1,21 @@
+apiVersion: "kubeflow.org/v1"
+kind: PyTorchJob
+metadata:
+  name: pythia-finetuning-demo
+  namespace: kubeflow-user # Or your preferred namespace
+spec:
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1 # We are running a single-node training job
+      restartPolicy: OnFailure
+      template:
+        spec:
+          containers:
+            - name: pytorch
+              # Your container image from Step 2
+              image: your-registry/pythia-finetune:v1
+              resources:
+                limits:
+                  # Request a GPU for training. Adjust based on your cluster's available resources.
+                  # For Pythia-410M, a T4 or V100 with 16GB VRAM is sufficient.
+                  nvidia.com/gpu: 1

@@ -1,0 +1,9 @@
+### These are commented out because our container actually provides all of these
+### If you want to run outside of a container you would need to uncomment these
+
+# accelerate
+# bitsandbytes
+# datasets
+# torch
+# transformers
+
