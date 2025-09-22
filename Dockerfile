@@ -12,7 +12,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy your fine-tuning script into the container
-COPY finetune.py .
+COPY finetune_lyrics.py .
 
 # Command to execute when the container starts
-CMD ["python", "finetune.py"]
+CMD ["python", "finetune_lyrics.py"]

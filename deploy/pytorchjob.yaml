@@ -2,20 +2,65 @@ apiVersion: "kubeflow.org/v1"
 kind: PyTorchJob
 metadata:
   name: pythia-finetuning-demo
-  namespace: kubeflow-user # Or your preferred namespace
+  namespace: lyric-professor
+  annotations:
+    # OpenShift AI metrics collection annotations
+    opendatahub.io/connection: "true"
+    ml-platform/workbench: "lyrics-training"
 spec:
   pytorchReplicaSpecs:
     Master:
-      replicas: 1 # We are running a single-node training job
+      replicas: 1 # Single-node training for lyrics fine-tuning
       restartPolicy: OnFailure
       template:
+        metadata:
+          annotations:
+            # Additional annotations for OpenShift AI monitoring
+            ml-platform/component: "pytorch-training"
+            ml-platform/model: "pythia-410m-lyrics"
         spec:
+          tolerations:
+            - effect: NoSchedule
+              key: nvidia.com/gpu
+              operator: Exists
           containers:
             - name: pytorch
-              # Your container image from Step 2
               image: your-registry/pythia-finetune:v1
+              env:
+                - name: EPOCHS
+                  value: "2"
+                - name: BATCH_SIZE
+                  value: "32"
+                - name: LEARNING_RATE
+                  value: "2e-4"
+                - name: DATA_DIR
+                  value: "/shared/data"
+                - name: OUTPUT_DIR
+                  value: "/shared/models"
               resources:
-                limits:
-                  # Request a GPU for training. Adjust based on your cluster's available resources.
-                  # For Pythia-410M, a T4 or V100 with 16GB VRAM is sufficient.
+                requests:
+                  memory: "16Gi"
+                  cpu: "4"
                   nvidia.com/gpu: 1
+                limits:
+                  memory: "32Gi"
+                  cpu: "8"
+                  # NVIDIA L40S with 48GB VRAM targeting 45GB utilization (94%)
+                  nvidia.com/gpu: 1
+              volumeMounts:
+                - name: training-data
+                  mountPath: /shared/data
+                - name: trained-models
+                  mountPath: /shared/models
+                - name: workspace
+                  mountPath: /shared/workspace
+          volumes:
+            - name: training-data
+              persistentVolumeClaim:
+                claimName: training-data-pvc
+            - name: trained-models
+              persistentVolumeClaim:
+                claimName: trained-models-pvc
+            - name: workspace
+              persistentVolumeClaim:
+                claimName: workspace-pvc

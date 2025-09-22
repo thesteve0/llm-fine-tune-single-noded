@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: training-data-pvc
+  namespace: lyric-professor
+  annotations:
+    # Storage for HuggingFace "rajtripathi/5M-Songs-Lyrics" dataset
+    ml-platform/data-type: "lyrics-dataset"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi # Sufficient for 5M song lyrics dataset
+  storageClassName: gp3-csi # Adjust based on your cluster's storage class
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trained-models-pvc
+  namespace: lyric-professor
+  annotations:
+    # Storage for Pythia-410M model outputs and checkpoints
+    ml-platform/data-type: "model-artifacts"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi # For model checkpoints, best_model/, training_history.json, etc.
+  storageClassName: gp3-csi # Adjust based on your cluster's storage class
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workspace-pvc
+  namespace: lyric-professor
+  annotations:
+    # Working directory and temporary files during training
+    ml-platform/data-type: "workspace"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi # For temporary files and working directory
+  storageClassName: gp3-csi # Adjust based on your cluster's storage class

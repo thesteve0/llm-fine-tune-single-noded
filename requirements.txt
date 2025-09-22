@@ -6,4 +6,4 @@
 # datasets
 # torch
 # transformers
-
+# flash-attn>=2.0.0  # For FlashAttention optimization
