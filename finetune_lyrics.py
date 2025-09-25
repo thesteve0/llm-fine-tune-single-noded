@@ -223,7 +223,6 @@ def main():
 
     try:
         # 4. Set Up Trainer with claude.md specifications
-        # 4. Set Up Trainer
         import transformers
         print(f"Transformers version: {transformers.__version__}")
 
@@ -275,6 +274,7 @@ def main():
     try:
         # 6. Save the best model and training artifacts as per claude.md
         trainer.save_model(f"{output_dir}/best_model")
+        tokenizer.save_pretrained(f"{output_dir}/best_model")
         print(f"Best model saved to {output_dir}/best_model")
 
         # Save training history as JSON
