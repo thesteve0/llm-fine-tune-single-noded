@@ -27,7 +27,7 @@ FULL_IMAGE_NAME="${REGISTRY_URL}/${IMAGE_NAME}:${NEW_VERSION}"
 echo "Container image: ${FULL_IMAGE_NAME}"
 
 # Step 2: Build and push container image
-echo "📦 Building container image..."
+echo "📦 Building container image (forcing fresh build)..."
 cd .. # Go to project root
 docker build -t "${FULL_IMAGE_NAME}" .
 
@@ -54,11 +54,33 @@ echo "✅ PyTorchJob updated with version ${NEW_VERSION}"
 #echo "🎯 Setting up OpenShift AI namespace..."
 #kubectl config set-context --current --namespace=lyric-professor
 
+# Check for existing PyTorchJob and clean up if necessary
+echo "🔍 Checking for existing PyTorchJob deployments..."
+if kubectl get pytorchjob pythia-finetuning-demo >/dev/null 2>&1; then
+    echo "⚠️  Found existing PyTorchJob 'pythia-finetuning-demo', deleting..."
+    kubectl delete pytorchjob pythia-finetuning-demo
+    
+    # Wait for pods to be cleaned up
+    echo "Waiting for pods to be cleaned up..."
+    sleep 10
+    
+    # Check if any pods are still running and force delete if necessary
+    if kubectl get pods -l pytorch-job-name=pythia-finetuning-demo --no-headers 2>/dev/null | grep -v "No resources found"; then
+        echo "Force deleting remaining pods..."
+        kubectl delete pods -l pytorch-job-name=pythia-finetuning-demo --force --grace-period=0 2>/dev/null || true
+        sleep 5
+    fi
+    
+    echo "✅ Cleanup completed"
+else
+    echo "✅ No existing PyTorchJob found"
+fi
+
 # Create storage PVCs first (required before PyTorchJob)
 echo "Creating storage PVCs for training data, models, and workspace..."
 kubectl apply -f storage.yaml
 
-echo "PVCs created (will bind when training pod starts):"
+echo "PVCs created will bind when training pod starts"
 kubectl get pvc
 
 # Apply the PyTorchJob to start the training

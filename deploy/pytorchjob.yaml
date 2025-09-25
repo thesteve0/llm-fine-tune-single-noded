@@ -39,12 +39,12 @@ spec:
                   value: "/shared/models"
               resources:
                 requests:
-                  memory: "16Gi"
-                  cpu: "4"
+                  memory: "10Gi"
+                  cpu: "2"
                   nvidia.com/gpu: 1
                 limits:
-                  memory: "32Gi"
-                  cpu: "8"
+                  memory: "13Gi"
+                  cpu: "3500m"
                   # NVIDIA L40S with 48GB VRAM targeting 45GB utilization (94%)
                   nvidia.com/gpu: 1
               volumeMounts:

@@ -69,4 +69,39 @@ The training script accepts configuration through environment variables:
 - Gradient norms and optimization stability
 - Sample throughput and training speed
 
+## TODO: Performance Optimizations for NVIDIA L4
+
+**Current Hardware Discovery**: Training is running on NVIDIA L4 (23GB VRAM) instead of L40S (48GB VRAM) as originally specified.
+
+**L4-Specific Optimizations to Implement:**
+
+1. **Switch to FP16 from BF16**: L4 performs better with FP16 precision
+   ```python
+   # Change from bf16=True to fp16=True in TrainingArguments
+   # Change model dtype from torch.bfloat16 to torch.float16
+   ```
+
+2. **Enable Flash Attention 2**: L4 supports Flash Attention for faster training
+   ```python
+   attn_implementation="flash_attention_2"
+   ```
+
+3. **Optimize Batch Size for L4 Memory**: 
+   ```python
+   per_device_train_batch_size=8  # Down from 16
+   gradient_accumulation_steps=8  # Up from 4
+   # Maintains same effective batch size of 64
+   ```
+
+4. **Consider Dynamic Padding**: Replace max_length padding with dynamic padding via DataCollatorForLanguageModeling
+
+5. **Enable Gradient Checkpointing**: Trade compute for memory to allow larger effective batch sizes
+
+**Current Performance**: ~3s/iteration (reasonable for L4 architecture optimized for inference)
+
+**Hardware Specs Update**:
+- **Actual GPU**: NVIDIA L4 (23GB VRAM) - inference-optimized
+- **Memory Usage**: 16.6GB/23GB (72% utilization)
+- **Performance**: 99% GPU utilization at 72W/72W power
+
   

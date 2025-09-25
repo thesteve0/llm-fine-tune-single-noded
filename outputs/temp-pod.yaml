@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: temp
+spec:
+  containers:
+    - name: temp
+      image: registry.redhat.io/ubi8/ubi:latest
+      command: ["sleep", "300"]
+      volumeMounts:
+        - name: models
+          mountPath: /models
+  volumes:
+    - name: models
+      persistentVolumeClaim:
+        claimName: trained-models-pvc
+  restartPolicy: Never
