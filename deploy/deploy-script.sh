@@ -8,9 +8,9 @@ set -e  # Exit on any error
 
 # Configuration
 REGISTRY_URL=${REGISTRY_URL:-"ghcr.io"}
-IMAGE_NAME=${IMAGE_NAME:-"thesteve0/pythia-finetune"}
+IMAGE_NAME=${IMAGE_NAME:-"thesteve0/smollm3-wilderness-finetune"}
 
-echo "🚀 Deploying Pythia-410M lyrics fine-tuning job to OpenShift AI..."
+echo "🚀 Deploying SmolLM3-3B wilderness survival fine-tuning job to OpenShift AI..."
 
 # Step 1: Generate timestamp-based version
 echo "📅 Generating timestamp-based version..."
@@ -84,7 +84,7 @@ echo "PVCs created will bind when training pod starts"
 kubectl get pvc
 
 # Apply the PyTorchJob to start the training
-echo "Starting PyTorchJob for lyrics fine-tuning with version ${NEW_VERSION}..."
+echo "Starting PyTorchJob for wilderness survival fine-tuning with version ${NEW_VERSION}..."
 kubectl apply -f pytorchjob-temp.yaml
 
 # Wait a moment for the job to initialize
