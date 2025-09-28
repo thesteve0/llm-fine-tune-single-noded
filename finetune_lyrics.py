@@ -5,31 +5,27 @@ from datasets import load_dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    TrainingArguments,
-    Trainer,
-    DataCollatorForLanguageModeling,
     TrainerCallback,
-    default_data_collator,
 )
+from trl import SFTTrainer, SFTConfig
 
 def main():
-    # 1. Configuration from environment variables (claude.md specs)
-    model_name = "EleutherAI/pythia-410m"
-    dataset_name = "rajtripathi/5M-Songs-Lyrics"  # 5 million song entries
-    epochs = int(os.getenv("EPOCHS", "2"))
-    batch_size = int(os.getenv("BATCH_SIZE", "16"))  # Reduced from 32 to fit memory
-    learning_rate = float(os.getenv("LEARNING_RATE", "2e-4"))
+    # Configuration from environment variables
+    model_name = "HuggingFaceTB/SmolLM3-3B"
+    dataset_path = "data/qa_dataset.parquet"
+    epochs = int(os.getenv("EPOCHS", "4"))
+    batch_size = int(os.getenv("BATCH_SIZE", "12"))
+    learning_rate = float(os.getenv("LEARNING_RATE", "5e-5"))
     data_dir = os.getenv("DATA_DIR", "/shared/data")
     output_dir = os.getenv("OUTPUT_DIR", "/shared/models")
 
-    # Create output directories as per claude.md specs
+    # Create output directories
     os.makedirs(f"{output_dir}/best_model", exist_ok=True)
     os.makedirs(f"{output_dir}/demo_outputs", exist_ok=True)
-    os.makedirs(data_dir, exist_ok=True)
 
     print(f"Configuration:")
     print(f"- Model: {model_name}")
-    print(f"- Dataset: {dataset_name}")
+    print(f"- Dataset: {dataset_path}")
     print(f"- Epochs: {epochs}")
     print(f"- Batch size: {batch_size}")
     print(f"- Learning rate: {learning_rate}")
@@ -43,53 +39,54 @@ def main():
     print(f"Using device: {device}")
 
     try:
-        # 2. Load Model and Tokenizer
+        # Load Model and Tokenizer
         print("Loading model and tokenizer...")
-        
-        # Load tokenizer first (needed for format_prompt function)
-        tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=f"{data_dir}/model_cache")
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        print("✅ Tokenizer loaded successfully")
 
-        # Load model with BF16 for L40S Ada architecture (per external docs)  
+        tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir="/tmp/model_cache")
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "right"
+        print("Tokenizer loaded successfully")
+
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.bfloat16,  # BF16 optimal for L40S Ada architecture
-            cache_dir=f"{data_dir}/model_cache",
-            # Remove device_map="auto" to avoid distributed training issues in single-node setup
-            # attn_implementation="flash_attention_2",  # Comment out until flash-attn is available
+            torch_dtype=torch.bfloat16,
+            cache_dir="/tmp/model_cache",
+            attn_implementation="flash_attention_2",
         )
 
-        # Manually move model to GPU for single-node training
         model = model.to(device)
-        print(f"✅ Model loaded on device: {device}")
+        print(f"Model loaded on device: {device}")
 
-        # Print model architecture to debug layer naming
-        print("Model architecture components:")
-        for name, _ in model.named_children():
-            print(f"  - {name}")
+        # Monitor VRAM usage after model loading
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            print(f"VRAM after model loading: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+            print(f"L40S VRAM utilization: {reserved/48*100:.1f}% of 48GB")
 
-        # Freeze all layers except the last two (claude.md specs)
+        # Freeze all layers except the last ones for memory efficiency
         for param in model.parameters():
             param.requires_grad = False
 
-        # Unfreeze only the last two layers - using correct Pythia architecture
-        # Pythia models use GPTNeoXForCausalLM with gpt_neox.layers and embed_out
+        # Unfreeze last 2 layers and output layer
         try:
-            # Try different possible layer naming conventions
-            if hasattr(model, 'gpt_neox') and hasattr(model.gpt_neox, 'layers'):
+            if hasattr(model, 'model') and hasattr(model.model, 'layers'):
+                layers = model.model.layers
+                for param in layers[-2:].parameters():
+                    param.requires_grad = True
+                print(f"Unfroze last 2 layers from model.layers (total layers: {len(layers)})")
+            elif hasattr(model, 'transformer') and hasattr(model.transformer, 'h'):
+                layers = model.transformer.h
+                for param in layers[-2:].parameters():
+                    param.requires_grad = True
+                print(f"Unfroze last 2 layers from transformer.h (total layers: {len(layers)})")
+            elif hasattr(model, 'gpt_neox') and hasattr(model.gpt_neox, 'layers'):
                 layers = model.gpt_neox.layers
                 for param in layers[-2:].parameters():
                     param.requires_grad = True
-                print(f"✅ Unfroze last 2 layers from gpt_neox.layers (total layers: {len(layers)})")
-            elif hasattr(model, 'transformer') and hasattr(model.transformer, 'h'):
-                layers = model.transformer.h  
-                for param in layers[-2:].parameters():
-                    param.requires_grad = True
-                print(f"✅ Unfroze last 2 layers from transformer.h (total layers: {len(layers)})")
+                print(f"Unfroze last 2 layers from gpt_neox.layers (total layers: {len(layers)})")
             else:
-                print("⚠️  Could not find transformer layers, unfreezing all parameters")
+                print("Could not find transformer layers, unfreezing all parameters")
                 for param in model.parameters():
                     param.requires_grad = True
 
@@ -97,16 +94,16 @@ def main():
             if hasattr(model, 'embed_out'):
                 for param in model.embed_out.parameters():
                     param.requires_grad = True
-                print("✅ Unfroze embed_out layer")
+                print("Unfroze embed_out layer")
             elif hasattr(model, 'lm_head'):
                 for param in model.lm_head.parameters():
                     param.requires_grad = True
-                print("✅ Unfroze lm_head layer")
+                print("Unfroze lm_head layer")
             else:
-                print("⚠️  Could not find output layer")
+                print("Could not find output layer")
 
         except Exception as e:
-            print(f"⚠️  Error unfreezing layers: {e}")
+            print(f"Error unfreezing layers: {e}")
             print("Falling back to unfreezing all parameters")
             for param in model.parameters():
                 param.requires_grad = True
@@ -116,105 +113,73 @@ def main():
         print(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.2f}%)")
 
     except Exception as e:
-        print(f"❌ Error loading model: {e}")
+        print(f"Error loading model: {e}")
         raise
 
     try:
-        # 3. Load and Prepare Dataset
-        print("Loading 5M Songs Lyrics dataset...")
-        dataset = load_dataset(dataset_name, cache_dir=f"{data_dir}/dataset_cache")
+        # Load and Prepare Dataset
+        print(f"Loading Q&A dataset from: {dataset_path}")
 
-        # Create train/validation split
-        if "train" in dataset:
-            full_dataset = dataset["train"]
-        else:
-            full_dataset = dataset[list(dataset.keys())[0]]  # Use first available split
+        dataset = load_dataset("parquet", data_files=dataset_path)
+        full_dataset = dataset["train"]
 
-        # Take a subset for efficient training (adjust size based on your needs)
-        train_size = min(50000, len(full_dataset))  # Limit to 50k for demo
-        subset_dataset = full_dataset.select(range(train_size))
-        split_dataset = subset_dataset.train_test_split(test_size=0.1, seed=42)
+        print(f"Total dataset size: {len(full_dataset):,} Q&A pairs")
+
+        split_dataset = full_dataset.train_test_split(test_size=0.1, seed=42)
         train_dataset = split_dataset['train']
         val_dataset = split_dataset['test']
 
-        print(f"Dataset features: {train_dataset.features}")
         print(f"Training samples: {len(train_dataset):,}")
         print(f"Validation samples: {len(val_dataset):,}")
 
     except Exception as e:
-        print(f"❌ Error loading dataset: {e}")
+        print(f"Error loading dataset: {e}")
         raise
 
-    # Preprocessing function to format the data for music lyrics understanding
+    # Define wilderness survival expert system prompt
+    WILDERNESS_EXPERT_SYSTEM_PROMPT = """You are a wilderness survival and practical skills expert. Your mission is to provide comprehensive, detailed guidance on essential survival and practical skills. Give thorough, step-by-step instructions with explanations of why each step matters.
+
+Your expertise covers:
+- Wilderness Survival Basics: Rule of 3s (3 minutes without air, 3 hours without shelter in harsh conditions, 3 days without water, 3 weeks without food), emergency signaling techniques, essential knots, identifying poisonous plants and safe alternatives
+- Basic First Aid: Treatment for cuts, burns, sprains, shock, and emergency care procedures
+- Simple Car Maintenance: Checking fluids (oil, coolant, brake, transmission), tire inspection and pressure, lights and electrical systems
+- Basic Cooking Techniques: Food safety, preparation methods, cooking over open fires, food preservation
+- Common Measurement Conversions: Imperial to metric, cooking measurements, distance and weight conversions
+- Essential Knots: Bowline, clove hitch, trucker's hitch, figure-eight, sheet bend, and their practical applications
+
+Always provide detailed explanations, safety warnings when relevant, and multiple approaches when possible. Your responses should be comprehensive enough to help someone learn and apply these skills safely and effectively. Aim for thorough, educational responses rather than brief answers."""
+
+    # Preprocessing function to format the Q&A data for TRL SFTTrainer
     def format_prompt(example):
-        # Format for lyrics analysis and generation as per claude.md goals
-        # Handle different dataset column formats
-        if 'Instruction' in example and 'Label' in example:
-            # This dataset format has Instruction and Label columns
-            instruction = example.get('Instruction', '')
-            label = example.get('Label', '')
-            prompt = f"""### Task: {instruction}
-### Response:
-{label[:1000]}"""  # Limit response length for training efficiency
-        else:
-            # Original format with song/artist/lyrics
-            song_title = example.get('song', example.get('Song', 'Unknown Song'))
-            artist = example.get('artist', example.get('Artist', 'Unknown Artist'))
-            lyrics = example.get('lyrics', example.get('Lyrics', ''))
-            prompt = f"""### Task: Analyze and understand these song lyrics
-### Artist: {artist}
-### Song: {song_title}
-### Lyrics Analysis:
-{lyrics[:1000]}"""  # Limit lyrics length for training efficiency
-        
-        return {"text": prompt + tokenizer.eos_token}
+        question = example['full-question']
+        answer = example['answer']
+
+        messages = [
+            {"role": "system", "content": WILDERNESS_EXPERT_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": answer}
+        ]
+
+        return {"messages": messages}
 
     try:
-        # Apply the formatting to train and validation datasets
-        print("Processing datasets...")
+        # Apply the formatting to train and validation datasets for TRL
+        print("Processing datasets for TRL SFTTrainer...")
         processed_train = train_dataset.map(format_prompt)
         processed_val = val_dataset.map(format_prompt)
 
-        # Tokenize the datasets - shorter sequences to save memory
-        def tokenize_function(examples):
-            # Use shorter max_length to reduce memory usage
-            result = tokenizer(
-                examples["text"], 
-                truncation=True, 
-                max_length=512,  # Reduced from 1024 to save memory
-                padding="max_length"
-            )
-            # For causal LM, labels should be identical to input_ids
-            result["labels"] = result["input_ids"].copy()
-            return result
-
-        tokenized_dataset = processed_train.map(
-            tokenize_function,
-            batched=True,
-            remove_columns=train_dataset.column_names
-        )
-
-        tokenized_val_dataset = processed_val.map(
-            tokenize_function,
-            batched=True,
-            remove_columns=val_dataset.column_names
-        )
-
-        print(f"Sample from tokenized dataset: {tokenized_dataset[0]['input_ids'][:50]}")
-        print(f"Dataset features after tokenization: {tokenized_dataset.features}")
-        print(f"First input_ids type: {type(tokenized_dataset[0]['input_ids'])}")
-        print(f"First input_ids sample values: {tokenized_dataset[0]['input_ids'][:10]}")
-        print(f"Label type: {type(tokenized_dataset[0]['labels'])} with values: {tokenized_dataset[0]['labels'][:10]}")
+        print(f"Training samples: {len(processed_train):,}")
+        print(f"Validation samples: {len(processed_val):,}")
 
     except Exception as e:
-        print(f"❌ Error processing datasets: {e}")
+        print(f"Error processing datasets: {e}")
         raise
 
     # Custom trainer callback to track training history
     class TrainingHistoryCallback(TrainerCallback):
         def __init__(self):
             self.history = []
-        
+
         def on_log(self, args, state, control, model=None, logs=None, **kwargs):
             if logs:
                 self.history.append(logs)
@@ -222,22 +187,23 @@ def main():
     history_callback = TrainingHistoryCallback()
 
     try:
-        # 4. Set Up Trainer with claude.md specifications
+        # Set Up SFTTrainer with TRL for chat model fine-tuning
         import transformers
+        import trl
         print(f"Transformers version: {transformers.__version__}")
+        print(f"TRL version: {trl.__version__}")
 
-        # Use the correct TrainingArguments for transformers 4.51.3
-        training_args = TrainingArguments(
+        training_args = SFTConfig(
             output_dir=f"{output_dir}/checkpoints",
             per_device_train_batch_size=batch_size,
             per_device_eval_batch_size=batch_size,
-            gradient_accumulation_steps=4,
+            gradient_accumulation_steps=5,
             learning_rate=learning_rate,
+            max_grad_norm=1.0,
             num_train_epochs=epochs,
             logging_steps=10,
             save_steps=500,
             bf16=True,
-            # For transformers 4.51.3, use eval_strategy (not evaluation_strategy)
             eval_strategy="steps",
             eval_steps=100,
             save_strategy="steps",
@@ -249,30 +215,48 @@ def main():
             dataloader_num_workers=0,
             remove_unused_columns=False,
             report_to=[],
+            gradient_checkpointing=True,
+            dataloader_drop_last=True,
+            max_seq_length=1024,
+            packing=False,
         )
 
-        trainer = Trainer(
+        trainer = SFTTrainer(
             model=model,
             args=training_args,
-            train_dataset=tokenized_dataset,
-            eval_dataset=tokenized_val_dataset,
-            data_collator=default_data_collator,
+            train_dataset=processed_train,
+            eval_dataset=processed_val,
             callbacks=[history_callback],
         )
 
+        # Start Fine-Tuning
+        print("Starting fine-tuning on Q&A dataset with SmolLM3-3B...")
+        print(f"Target VRAM usage: <45GB/48GB (L40S GPU capacity)")
 
-        # 5. Start Fine-Tuning
-        print("🚀 Starting fine-tuning on 5M Songs Lyrics dataset...")
-        print(f"Target VRAM usage: 45GB/48GB (94% utilization)")
+        # Pre-training VRAM check
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            print(f"VRAM before training: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+            if reserved > 40:
+                print("WARNING: High VRAM usage before training - risk of OOM!")
+
         training_result = trainer.train()
-        print("✅ Fine-tuning complete!")
+        print("Fine-tuning complete!")
+
+        # Post-training VRAM check
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            print(f"VRAM after training: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+            print(f"Peak L40S VRAM utilization: {reserved/48*100:.1f}% of 48GB")
 
     except Exception as e:
-        print(f"❌ Error during training: {e}")
+        print(f"Error during training: {e}")
         raise
 
     try:
-        # 6. Save the best model and training artifacts as per claude.md
+        # Save the best model and training artifacts
         trainer.save_model(f"{output_dir}/best_model")
         tokenizer.save_pretrained(f"{output_dir}/best_model")
         print(f"Best model saved to {output_dir}/best_model")
@@ -284,7 +268,7 @@ def main():
         # Save training summary
         training_summary = {
             "model_name": model_name,
-            "dataset_name": dataset_name,
+            "dataset_path": dataset_path,
             "epochs": epochs,
             "batch_size": batch_size,
             "learning_rate": learning_rate,
@@ -299,41 +283,59 @@ def main():
             json.dump(training_summary, f, indent=2)
 
     except Exception as e:
-        print(f"❌ Error saving artifacts: {e}")
+        print(f"Error saving artifacts: {e}")
         raise
 
     try:
-        # 7. Generate demo outputs for conference demonstration
+        # Generate demo outputs for Q&A demonstration
         print("Generating demo outputs...")
-        demo_prompts = [
-            "### Task: Analyze and understand these song lyrics\n### Artist: The Beatles\n### Song: Yesterday\n### Lyrics Analysis:",
-            "### Task: Analyze and understand these song lyrics\n### Artist: Bob Dylan\n### Song: Blowin' in the Wind\n### Lyrics Analysis:",
-            "### Task: Analyze and understand these song lyrics\n### Artist: Nirvana\n### Song: Smells Like Teen Spirit\n### Lyrics Analysis:"
+        demo_questions = [
+            "For Simple Car Maintenance Checks, How often should I check my oil level?",
+            "For Basic Home Repairs, How do I fix a leaky faucet?",
+            "For Computer Troubleshooting, What should I do if my computer won't start?"
         ]
 
+        # Disable gradient checkpointing for inference
+        model.config.use_cache = True
+        if hasattr(model, 'gradient_checkpointing_enable'):
+            model.gradient_checkpointing_disable()
+
         demo_outputs = []
-        for i, prompt in enumerate(demo_prompts):
+        for i, question in enumerate(demo_questions):
             try:
+                messages = [
+                    {"role": "system", "content": WILDERNESS_EXPERT_SYSTEM_PROMPT},
+                    {"role": "user", "content": question}
+                ]
+
+                prompt = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+
                 inputs = tokenizer(prompt, return_tensors="pt")
                 if torch.cuda.is_available():
                     inputs = inputs.to(device)
-                    
+
                 with torch.no_grad():
                     output = model.generate(
-                        **inputs, 
-                        max_new_tokens=150, 
-                        do_sample=True, 
-                        top_k=50, 
-                        top_p=0.95,
-                        temperature=0.7,
-                        pad_token_id=tokenizer.eos_token_id
+                        **inputs,
+                        max_new_tokens=100,
+                        do_sample=True,
+                        top_k=40,
+                        top_p=0.9,
+                        temperature=0.3,
+                        repetition_penalty=1.1,
+                        pad_token_id=tokenizer.eos_token_id,
+                        use_cache=True
                     )
                 generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
                 demo_outputs.append({"prompt": prompt, "response": generated_text})
                 print(f"\n--- Demo Output {i+1} ---")
                 print(generated_text[:500] + "...")
             except Exception as e:
-                print(f"⚠️  Error generating demo output {i+1}: {e}")
+                print(f"Error generating demo output {i+1}: {e}")
                 demo_outputs.append({"prompt": prompt, "response": f"Error: {e}"})
 
         # Save demo outputs
@@ -341,12 +343,12 @@ def main():
             json.dump(demo_outputs, f, indent=2)
 
     except Exception as e:
-        print(f"❌ Error generating demo outputs: {e}")
+        print(f"Error generating demo outputs: {e}")
         # Don't raise here, demo outputs are optional
 
-    print(f"\n🎵 Music lyrics fine-tuning completed successfully!")
-    print(f"📊 Training artifacts saved to {output_dir}/")
-    print(f"🎭 Demo outputs saved to {output_dir}/demo_outputs/")
+    print(f"\nQ&A fine-tuning completed successfully!")
+    print(f"Training artifacts saved to {output_dir}/")
+    print(f"Demo outputs saved to {output_dir}/demo_outputs/")
 
 if __name__ == "__main__":
     main()

@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: temp
+  name: model-extractor
 spec:
   containers:
     - name: temp
       image: registry.redhat.io/ubi8/ubi:latest
-      command: ["sleep", "300"]
+      command: ["sleep", "30000"]
       volumeMounts:
         - name: models
           mountPath: /models

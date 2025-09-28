@@ -10,14 +10,14 @@ metadata:
 spec:
   pytorchReplicaSpecs:
     Master:
-      replicas: 1 # Single-node training for lyrics fine-tuning
+      replicas: 1 # Single-node training for wilderness survival fine-tuning
       restartPolicy: OnFailure
       template:
         metadata:
           annotations:
             # Additional annotations for OpenShift AI monitoring
             ml-platform/component: "pytorch-training"
-            ml-platform/model: "pythia-410m-lyrics"
+            ml-platform/model: "smollm3-3b-wilderness"
         spec:
           tolerations:
             - effect: NoSchedule
@@ -28,36 +28,31 @@ spec:
               image: your-registry/pythia-finetune:v1
               env:
                 - name: EPOCHS
-                  value: "2"
+                  value: "4"
                 - name: BATCH_SIZE
-                  value: "32"
+                  value: "12"
                 - name: LEARNING_RATE
-                  value: "2e-4"
+                  value: "5e-5"
                 - name: DATA_DIR
                   value: "/shared/data"
                 - name: OUTPUT_DIR
                   value: "/shared/models"
               resources:
                 requests:
-                  memory: "10Gi"
-                  cpu: "2"
+                  memory: "16Gi"
+                  cpu: "4"
                   nvidia.com/gpu: 1
                 limits:
-                  memory: "13Gi"
-                  cpu: "3500m"
+                  memory: "20Gi"
+                  cpu: "6"
                   # NVIDIA L40S with 48GB VRAM targeting 45GB utilization (94%)
                   nvidia.com/gpu: 1
               volumeMounts:
-                - name: training-data
-                  mountPath: /shared/data
                 - name: trained-models
                   mountPath: /shared/models
                 - name: workspace
                   mountPath: /shared/workspace
           volumes:
-            - name: training-data
-              persistentVolumeClaim:
-                claimName: training-data-pvc
             - name: trained-models
               persistentVolumeClaim:
                 claimName: trained-models-pvc
