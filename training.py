@@ -14,10 +14,10 @@ def main():
     model_name = "HuggingFaceTB/SmolLM3-3B"
     dataset_path = "data/qa_dataset.parquet"
     epochs = int(os.getenv("EPOCHS", "4"))
-    batch_size = int(os.getenv("BATCH_SIZE", "12"))
+    batch_size = int(os.getenv("BATCH_SIZE", "8"))
     learning_rate = float(os.getenv("LEARNING_RATE", "5e-5"))
-    data_dir = os.getenv("DATA_DIR", "/shared/data")
-    output_dir = os.getenv("OUTPUT_DIR", "/shared/models")
+    data_dir = os.getenv("DATA_DIR", "/tmp/data")
+    output_dir = os.getenv("OUTPUT_DIR", "/tmp/models")
 
     # Create output directories
     os.makedirs(f"{output_dir}/best_model", exist_ok=True)
@@ -197,7 +197,7 @@ Always provide detailed explanations, safety warnings when relevant, and multipl
             output_dir=f"{output_dir}/checkpoints",
             per_device_train_batch_size=batch_size,
             per_device_eval_batch_size=batch_size,
-            gradient_accumulation_steps=5,
+            gradient_accumulation_steps=4,
             learning_rate=learning_rate,
             max_grad_norm=1.0,
             num_train_epochs=epochs,
