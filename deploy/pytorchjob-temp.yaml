@@ -7,7 +7,7 @@ metadata:
     # OpenShift AI metrics collection annotations
     opendatahub.io/connection: "true"
     ml-platform/workbench: "lyrics-training"
-    project-version: "0.1.20250927-181232"
+    project-version: "0.1.20251018-130255"
 spec:
   pytorchReplicaSpecs:
     Master:
@@ -26,12 +26,12 @@ spec:
               operator: Exists
           containers:
             - name: pytorch
-              image: ghcr.io/thesteve0/smollm3-wilderness-finetune:0.1.20250927-181232
+              image: ghcr.io/thesteve0/smollm3-wilderness-finetune:0.1.20251018-130255
               env:
                 - name: EPOCHS
                   value: "4"
                 - name: BATCH_SIZE
-                  value: "12"
+                  value: "8"
                 - name: LEARNING_RATE
                   value: "5e-5"
                 - name: DATA_DIR

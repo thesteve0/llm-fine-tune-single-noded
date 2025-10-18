@@ -30,7 +30,7 @@ spec:
                 - name: EPOCHS
                   value: "4"
                 - name: BATCH_SIZE
-                  value: "12"
+                  value: "8"
                 - name: LEARNING_RATE
                   value: "5e-5"
                 - name: DATA_DIR
